@@ -41,11 +41,10 @@ jobs:
           DOMAIN_COUNT=0
           
           # 处理域名配置，支持空格和|分隔
-          # 将|替换为空格，统一处理
           ALL_DOMAINS=$(echo "$CERT_DOMAINS" | sed 's/|/ /g')
           
           for domain in $ALL_DOMAINS; do
-            domain=$(echo "$domain" | xargs)  # 移除前后空格
+            domain=$(echo "$domain" | xargs)
             
             if [ -z "$domain" ]; then
               continue
@@ -88,77 +87,15 @@ jobs:
             exit 1
           fi
           
-      - name: 检查证书文件并使用证书链
-        if: env.CERT_SUCCESS == 'true'
-        run: |
-          PRIMARY_DOMAIN="${{ env.PRIMARY_DOMAIN }}"
-          CERT_DIR="$HOME/.acme.sh/$PRIMARY_DOMAIN"
-          
-          echo "========================================"
-          echo "检查证书文件 (使用证书链)"
-          echo "证书目录: $CERT_DIR"
-          echo "========================================"
-          echo ""
-          
-          # 检查证书文件
-          echo "=== 证书文件列表 ==="
-          ls -la "$CERT_DIR/"
-          echo ""
-          
-          # 检查各种证书文件
-          CERT_FILE="$CERT_DIR/$PRIMARY_DOMAIN.cer"           # 单个证书
-          FULLCHAIN_FILE="$CERT_DIR/fullchain.cer"            # 完整证书链
-          KEY_FILE="$CERT_DIR/$PRIMARY_DOMAIN.key"            # 私钥
-          CA_FILE="$CERT_DIR/ca.cer"                          # CA证书
-          
-          echo "=== 证书文件检查 ==="
-          echo "单个证书文件: $CERT_FILE $([ -f "$CERT_FILE" ] && echo "✅存在" || echo "❌不存在")"
-          echo "证书链文件: $FULLCHAIN_FILE $([ -f "$FULLCHAIN_FILE" ] && echo "✅存在" || echo "❌不存在")"
-          echo "私钥文件: $KEY_FILE $([ -f "$KEY_FILE" ] && echo "✅存在" || echo "❌不存在")"
-          echo "CA证书文件: $CA_FILE $([ -f "$CA_FILE" ] && echo "✅存在" || echo "❌不存在")"
-          echo ""
-          
-          # 优先使用完整证书链
-          if [ -f "$FULLCHAIN_FILE" ]; then
-            echo "✅ 使用完整证书链: $FULLCHAIN_FILE"
-            echo "CERT_TO_USE=$FULLCHAIN_FILE" >> $GITHUB_ENV
-            echo "CERT_TYPE=fullchain" >> $GITHUB_ENV
-          elif [ -f "$CERT_FILE" ]; then
-            echo "⚠️ 使用单个证书文件: $CERT_FILE"
-            echo "CERT_TO_USE=$CERT_FILE" >> $GITHUB_ENV
-            echo "CERT_TYPE=single" >> $GITHUB_ENV
-          else
-            echo "❌ 没有找到证书文件！"
-            exit 1
-          fi
-          
-          if [ ! -f "$KEY_FILE" ]; then
-            echo "❌ 私钥文件不存在: $KEY_FILE"
-            exit 1
-          fi
-          
-          echo ""
-          echo "=== 证书链内容预览 ==="
-          if [ -f "$FULLCHAIN_FILE" ]; then
-            echo "证书链包含的证书数量:"
-            grep -c "BEGIN CERTIFICATE" "$FULLCHAIN_FILE" || echo "无法统计"
-            echo ""
-            echo "证书链详细信息:"
-            openssl crl2pkcs7 -nocrl -certfile "$FULLCHAIN_FILE" | openssl pkcs7 -print_certs -noout || \
-            openssl x509 -in "$FULLCHAIN_FILE" -noout -subject -issuer -dates
-          fi
-          
-      - name: 一次性上传证书链到阿里云CDN
+      - name: 一次性上传证书到阿里云CDN
         if: env.CERT_SUCCESS == 'true'
         env:
-          # 使用相同的阿里云凭据进行CDN部署
           DEPLOY_ALI_CDN_ACCESS_KEY_ID: ${{ secrets.ALI_KEY }}
           DEPLOY_ALI_CDN_ACCESS_KEY_SECRET: ${{ secrets.ALI_SECRET }}
           DEPLOY_ALI_CDN_DOMAIN: ${{ secrets.CDN_DOMAINS }}
         run: |
           CDN_DOMAINS="${{ secrets.CDN_DOMAINS }}"
           PRIMARY_DOMAIN="${{ env.PRIMARY_DOMAIN }}"
-          CERT_TYPE="${{ env.CERT_TYPE }}"
           
           if [ -z "$CDN_DOMAINS" ]; then
             echo "错误: 请在 secrets 中配置 CDN_DOMAINS"
@@ -171,61 +108,37 @@ jobs:
           fi
           
           echo "========================================"
-          echo "开始上传证书链到阿里云CDN"
+          echo "开始上传证书到阿里云CDN"
           echo "主域名: $PRIMARY_DOMAIN"
-          echo "证书类型: $CERT_TYPE"
           echo "CDN域名配置: $CDN_DOMAINS"
           echo "========================================"
           echo ""
           
-          # 一次性部署到CDN (acme.sh会自动使用完整证书链)
-          echo "执行CDN部署命令 (使用证书链)..."
+          # 直接部署到CDN，acme.sh会自动处理证书文件
+          echo "执行CDN部署命令..."
           if ~/.acme.sh/acme.sh --deploy -d "$PRIMARY_DOMAIN" --deploy-hook ali_cdn; then
-            echo "✅ 证书链成功上传到阿里云CDN！"
+            echo "✅ 证书成功上传到阿里云CDN！"
             echo "CDN_DEPLOY_SUCCESS=true" >> $GITHUB_ENV
           else
-            echo "❌ 证书链上传到CDN失败！"
+            echo "❌ 证书上传到CDN失败！"
             echo "CDN_DEPLOY_SUCCESS=false" >> $GITHUB_ENV
             exit 1
           fi
           
       - name: 检查最终状态
+        if: always()
         run: |
           echo "========================================"
           echo "任务执行完成 - 最终状态检查"
           echo "========================================"
           echo ""
           echo "=== 证书列表 ==="
-          ~/.acme.sh/acme.sh --list
-          echo ""
-          echo "=== 证书链详细信息 ==="
-          PRIMARY_DOMAIN="${{ env.PRIMARY_DOMAIN }}"
-          if [ -n "$PRIMARY_DOMAIN" ]; then
-            CERT_DIR="$HOME/.acme.sh/$PRIMARY_DOMAIN"
-            FULLCHAIN_FILE="$CERT_DIR/fullchain.cer"
-            
-            if [ -f "$FULLCHAIN_FILE" ]; then
-              echo "📄 证书链文件: $FULLCHAIN_FILE"
-              echo "证书链包含证书数: $(grep -c "BEGIN CERTIFICATE" "$FULLCHAIN_FILE")"
-              echo ""
-              echo "证书链中的每个证书:"
-              awk '/BEGIN CERTIFICATE/{cert++} cert{print > "cert"cert".tmp"} /END CERTIFICATE/{cert++}' "$FULLCHAIN_FILE"
-              for cert_file in cert*.tmp; do
-                if [ -f "$cert_file" ]; then
-                  echo "--- 证书 $cert_file ---"
-                  openssl x509 -in "$cert_file" -noout -subject -issuer -dates 2>/dev/null || echo "解析失败"
-                  rm -f "$cert_file"
-                  echo ""
-                fi
-              done
-            fi
-          fi
+          ~/.acme.sh/acme.sh --list || echo "获取证书列表失败"
           echo ""
           echo "=== 环境变量检查 ==="
           echo "CERT_SUCCESS: ${{ env.CERT_SUCCESS }}"
           echo "CDN_DEPLOY_SUCCESS: ${{ env.CDN_DEPLOY_SUCCESS }}"
           echo "PRIMARY_DOMAIN: ${{ env.PRIMARY_DOMAIN }}"
-          echo "CERT_TYPE: ${{ env.CERT_TYPE }}"
                     
       - name: 发送通知
         if: always()
@@ -235,20 +148,19 @@ jobs:
           CERT_SUCCESS="${{ env.CERT_SUCCESS }}"
           CDN_DEPLOY_SUCCESS="${{ env.CDN_DEPLOY_SUCCESS }}"
           PRIMARY_DOMAIN="${{ env.PRIMARY_DOMAIN }}"
-          CERT_TYPE="${{ env.CERT_TYPE }}"
           JOB_STATUS="${{ job.status }}"
           
           if [ "$JOB_STATUS" == "success" ] && [ "$CERT_SUCCESS" == "true" ] && [ "$CDN_DEPLOY_SUCCESS" == "true" ]; then
             STATUS="✅ 完全成功"
-            MESSAGE="SSL证书链一次性申请和CDN一次性部署全部成功"
+            MESSAGE="SSL证书一次性申请和CDN一次性部署全部成功"
             EMOJI="🎉"
           elif [ "$CERT_SUCCESS" == "true" ] && [ "$CDN_DEPLOY_SUCCESS" != "true" ]; then
             STATUS="⚠️ 部分成功"
-            MESSAGE="SSL证书链申请成功，但CDN部署失败"
+            MESSAGE="SSL证书申请成功，但CDN部署失败"
             EMOJI="⚠️"
           elif [ "$CERT_SUCCESS" != "true" ]; then
             STATUS="❌ 申请失败"
-            MESSAGE="SSL证书链申请失败"
+            MESSAGE="SSL证书申请失败"
             EMOJI="💥"
           else
             STATUS="❌ 失败"
@@ -261,19 +173,10 @@ jobs:
           # 构建域名信息
           DOMAIN_INFO=""
           if [ -n "$PRIMARY_DOMAIN" ]; then
-            # 计算域名数量
             CERT_DOMAINS="${{ secrets.CERT_DOMAINS }}"
             ALL_DOMAINS=$(echo "$CERT_DOMAINS" | sed 's/|/ /g')
             DOMAIN_COUNT=$(echo $ALL_DOMAINS | wc -w)
             DOMAIN_INFO="\n- **主域名**: $PRIMARY_DOMAIN\n- **域名总数**: $DOMAIN_COUNT 个"
-            
-            if [ -n "$CERT_TYPE" ]; then
-              if [ "$CERT_TYPE" == "fullchain" ]; then
-                DOMAIN_INFO="$DOMAIN_INFO\n- **证书类型**: 完整证书链 ✅"
-              else
-                DOMAIN_INFO="$DOMAIN_INFO\n- **证书类型**: 单个证书 ⚠️"
-              fi
-            fi
           fi
           
           CDN_INFO=""
@@ -282,7 +185,7 @@ jobs:
             CDN_INFO="\n- **CDN域名数**: $CDN_COUNT 个"
           fi
           
-          FULL_MESSAGE="$EMOJI **SSL证书链自动化任务通知**\n\n- **状态**: $STATUS\n- **时间**: $TIMESTAMP\n- **CA**: ZeroSSL (默认)\n- **仓库**: ${{ github.repository }}$DOMAIN_INFO$CDN_INFO\n- **详情**: $MESSAGE\n- **运行ID**: ${{ github.run_id }}"
+          FULL_MESSAGE="$EMOJI **SSL证书自动化任务通知**\n\n- **状态**: $STATUS\n- **时间**: $TIMESTAMP\n- **CA**: ZeroSSL (默认)\n- **仓库**: ${{ github.repository }}$DOMAIN_INFO$CDN_INFO\n- **详情**: $MESSAGE\n- **运行ID**: ${{ github.run_id }}"
           
           # 企业微信通知
           if [ -n "$WECHAT_WEBHOOK" ]; then
