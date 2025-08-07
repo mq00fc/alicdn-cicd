@@ -14,20 +14,16 @@ jobs:
         
       - name: 安装acme.sh
         run: |
-          curl https://get.acme.sh | sh -s email=${{ secrets.ACME_EMAIL || '1@example.com' }}
+          curl https://get.acme.sh | sh -s email=${{ secrets.ACME_EMAIL || 'mq00fc@example.com' }}
           echo "$HOME/.acme.sh" >> $GITHUB_PATH
           
-      - name: 申请/续期SSL证书并部署到阿里云CDN
+      - name: 批量申请/续期SSL证书
         env:
           Ali_Key: ${{ secrets.ALI_KEY }}
           Ali_Secret: ${{ secrets.ALI_SECRET }}
-          DEPLOY_ALI_CDN_ACCESS_KEY_ID: ${{ secrets.ALI_ACCESS_KEY_ID }}
-          DEPLOY_ALI_CDN_ACCESS_KEY_SECRET: ${{ secrets.ALI_ACCESS_KEY_SECRET }}
-          DEPLOY_ALI_CDN_DOMAIN: ${{ secrets.CDN_DOMAINS }}
         run: |   
           # 从 secrets 读取域名配置
           CERT_DOMAINS="${{ secrets.CERT_DOMAINS }}"
-          CDN_DOMAINS="${{ secrets.CDN_DOMAINS }}"
           
           # 如果没有配置域名，使用默认值
           if [ -z "$CERT_DOMAINS" ]; then
@@ -35,14 +31,12 @@ jobs:
             exit 1
           fi
           
-          if [ -z "$CDN_DOMAINS" ]; then
-            echo "错误: 请在 secrets 中配置 CDN_DOMAINS"
-            exit 1
-          fi
-          
           echo "证书域名: $CERT_DOMAINS"
-          echo "CDN域名: $CDN_DOMAINS"
           echo "使用 CA: ZeroSSL (默认)"
+          echo ""
+          
+          # 记录成功申请的证书
+          SUCCESS_DOMAINS=""
           
           # 处理多个证书域名（支持通配符和多域名证书）
           IFS='|' read -ra DOMAIN_GROUPS <<< "$CERT_DOMAINS"
@@ -79,23 +73,78 @@ jobs:
             echo "开始申请/续期证书 (使用 ZeroSSL)..."
             if ~/.acme.sh/acme.sh --issue --dns dns_ali $domain_args; then
               echo "✅ 证书申请/续期成功"
+              SUCCESS_DOMAINS="$SUCCESS_DOMAINS $primary_domain"
             elif ~/.acme.sh/acme.sh --renew -d "$primary_domain" --force; then
               echo "✅ 强制续期成功"
+              SUCCESS_DOMAINS="$SUCCESS_DOMAINS $primary_domain"
             else
               echo "❌ 证书申请/续期失败，跳过此域名组"
+            fi
+            
+            echo ""
+          done
+          
+          # 将成功的域名保存到环境变量文件
+          echo "SUCCESS_DOMAINS=$SUCCESS_DOMAINS" >> $GITHUB_ENV
+          echo "成功申请的证书域名: $SUCCESS_DOMAINS"
+          
+      - name: 批量部署证书到阿里云CDN
+        env:
+          # CDN部署使用相同的阿里云凭据
+          DEPLOY_ALI_CDN_ACCESS_KEY_ID: ${{ secrets.ALI_KEY }}
+          DEPLOY_ALI_CDN_ACCESS_KEY_SECRET: ${{ secrets.ALI_SECRET }}
+          DEPLOY_ALI_CDN_DOMAIN: ${{ secrets.CDN_DOMAINS }}
+        run: |
+          CDN_DOMAINS="${{ secrets.CDN_DOMAINS }}"
+          
+          if [ -z "$CDN_DOMAINS" ]; then
+            echo "错误: 请在 secrets 中配置 CDN_DOMAINS"
+            exit 1
+          fi
+          
+          if [ -z "$SUCCESS_DOMAINS" ]; then
+            echo "没有成功申请的证书，跳过CDN部署"
+            exit 0
+          fi
+          
+          echo "CDN域名: $CDN_DOMAINS"
+          echo "准备部署的证书域名: $SUCCESS_DOMAINS"
+          echo ""
+          
+          # 遍历成功申请的证书并部署到CDN
+          for primary_domain in $SUCCESS_DOMAINS; do
+            primary_domain=$(echo "$primary_domain" | xargs)  # 移除空格
+            
+            if [ -z "$primary_domain" ]; then
+              continue
+            fi
+            
+            echo "=== 部署证书: $primary_domain ==="
+            
+            # 检查证书文件是否存在
+            if [ ! -f "$HOME/.acme.sh/$primary_domain/$primary_domain.cer" ]; then
+              echo "❌ 证书文件不存在: $HOME/.acme.sh/$primary_domain/$primary_domain.cer"
               continue
             fi
             
             # 部署证书到阿里云CDN
             echo "开始部署证书到阿里云CDN..."
             if ~/.acme.sh/acme.sh --deploy -d "$primary_domain" --deploy-hook ali_cdn; then
-              echo "✅ 证书部署到CDN成功"
+              echo "✅ 证书 $primary_domain 部署到CDN成功"
             else
-              echo "❌ 证书部署到CDN失败"
+              echo "❌ 证书 $primary_domain 部署到CDN失败"
             fi
             
             echo ""
           done
+          
+      - name: 检查证书状态
+        run: |
+          echo "=== 当前证书状态 ==="
+          ~/.acme.sh/acme.sh --list
+          echo ""
+          echo "=== 证书详细信息 ==="
+          find $HOME/.acme.sh -name "*.cer" -exec echo "证书文件: {}" \; -exec openssl x509 -in {} -noout -subject -issuer -dates 2>/dev/null \; -exec echo "" \;
                     
       - name: 发送通知
         if: always()
@@ -105,15 +154,21 @@ jobs:
           if [ "${{ job.status }}" == "success" ]; then
             STATUS="✅ 成功"
             MESSAGE="SSL证书续期和CDN部署任务执行成功 (使用 ZeroSSL)"
-            COLOR="green"
           else
             STATUS="❌ 失败"  
             MESSAGE="SSL证书续期或CDN部署过程中出现错误，请检查日志"
-            COLOR="red"
           fi
           
           TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S UTC')
-          FULL_MESSAGE="**SSL证书自动化任务通知**\n\n- **状态**: $STATUS\n- **时间**: $TIMESTAMP\n- **CA**: ZeroSSL (默认)\n- **仓库**: ${{ github.repository }}\n- **工作流**: ${{ github.workflow }}\n- **详情**: $MESSAGE\n- **运行ID**: ${{ github.run_id }}"
+          
+          # 添加成功处理的域名信息
+          if [ -n "$SUCCESS_DOMAINS" ]; then
+            DOMAIN_INFO="\n- **处理域名**: $SUCCESS_DOMAINS"
+          else
+            DOMAIN_INFO="\n- **处理域名**: 无成功域名"
+          fi
+          
+          FULL_MESSAGE="**SSL证书自动化任务通知**\n\n- **状态**: $STATUS\n- **时间**: $TIMESTAMP\n- **CA**: ZeroSSL (默认)\n- **仓库**: ${{ github.repository }}\n- **工作流**: ${{ github.workflow }}$DOMAIN_INFO\n- **详情**: $MESSAGE\n- **运行ID**: ${{ github.run_id }}"
           
           # 企业微信通知
           if [ -n "$WECHAT_WEBHOOK" ]; then
