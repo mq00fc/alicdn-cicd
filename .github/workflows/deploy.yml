@@ -1,0 +1,128 @@
+name: acme申请证书自动上传到阿里云cdn
+
+on:
+  schedule:
+    - cron: '0 8 1 * *'  # 每月1号上午8点执行
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  renew-and-deploy-certs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        
+      - name: 安装acme.sh
+        run: |
+          curl https://get.acme.sh | sh -s email=${{ secrets.ACME_EMAIL || '1@example.com' }}
+          echo "$HOME/.acme.sh" >> $GITHUB_PATH
+          
+      - name: 申请/续期SSL证书并部署到阿里云CDN
+        env:
+          Ali_Key: ${{ secrets.ALI_KEY }}
+          Ali_Secret: ${{ secrets.ALI_SECRET }}
+          DEPLOY_ALI_CDN_ACCESS_KEY_ID: ${{ secrets.ALI_ACCESS_KEY_ID }}
+          DEPLOY_ALI_CDN_ACCESS_KEY_SECRET: ${{ secrets.ALI_ACCESS_KEY_SECRET }}
+          DEPLOY_ALI_CDN_DOMAIN: ${{ secrets.CDN_DOMAINS }}
+        run: |   
+          # 从 secrets 读取域名配置
+          CERT_DOMAINS="${{ secrets.CERT_DOMAINS }}"
+          CDN_DOMAINS="${{ secrets.CDN_DOMAINS }}"
+          
+          # 如果没有配置域名，使用默认值
+          if [ -z "$CERT_DOMAINS" ]; then
+            echo "错误: 请在 secrets 中配置 CERT_DOMAINS"
+            exit 1
+          fi
+          
+          if [ -z "$CDN_DOMAINS" ]; then
+            echo "错误: 请在 secrets 中配置 CDN_DOMAINS"
+            exit 1
+          fi
+          
+          echo "证书域名: $CERT_DOMAINS"
+          echo "CDN域名: $CDN_DOMAINS"
+          echo "使用 CA: ZeroSSL (默认)"
+          
+          # 处理多个证书域名（支持通配符和多域名证书）
+          IFS='|' read -ra DOMAIN_GROUPS <<< "$CERT_DOMAINS"
+          
+          for domain_group in "${DOMAIN_GROUPS[@]}"; do
+            # 移除前后空格
+            domain_group=$(echo "$domain_group" | xargs)
+            
+            if [ -z "$domain_group" ]; then
+              continue
+            fi
+            
+            echo "=== 处理域名组: $domain_group ==="
+            
+            # 构建 acme.sh 命令的域名参数
+            domain_args=""
+            primary_domain=""
+            IFS=' ' read -ra DOMAINS <<< "$domain_group"
+            
+            for i in "${!DOMAINS[@]}"; do
+              domain=$(echo "${DOMAINS[$i]}" | xargs)  # 移除空格
+              if [ $i -eq 0 ]; then
+                primary_domain="$domain"
+                domain_args="-d $domain"
+              else
+                domain_args="$domain_args -d $domain"
+              fi
+            done
+            
+            echo "主域名: $primary_domain"
+            echo "域名参数: $domain_args"
+            
+            # 申请或续期证书 (使用默认的 ZeroSSL)
+            echo "开始申请/续期证书 (使用 ZeroSSL)..."
+            if ~/.acme.sh/acme.sh --issue --dns dns_ali $domain_args; then
+              echo "✅ 证书申请/续期成功"
+            elif ~/.acme.sh/acme.sh --renew -d "$primary_domain" --force; then
+              echo "✅ 强制续期成功"
+            else
+              echo "❌ 证书申请/续期失败，跳过此域名组"
+              continue
+            fi
+            
+            # 部署证书到阿里云CDN
+            echo "开始部署证书到阿里云CDN..."
+            if ~/.acme.sh/acme.sh --deploy -d "$primary_domain" --deploy-hook ali_cdn; then
+              echo "✅ 证书部署到CDN成功"
+            else
+              echo "❌ 证书部署到CDN失败"
+            fi
+            
+            echo ""
+          done
+                    
+      - name: 发送通知
+        if: always()
+        env:
+          WECHAT_WEBHOOK: ${{ secrets.WECHAT_WEBHOOK }}
+        run: |
+          if [ "${{ job.status }}" == "success" ]; then
+            STATUS="✅ 成功"
+            MESSAGE="SSL证书续期和CDN部署任务执行成功 (使用 ZeroSSL)"
+            COLOR="green"
+          else
+            STATUS="❌ 失败"  
+            MESSAGE="SSL证书续期或CDN部署过程中出现错误，请检查日志"
+            COLOR="red"
+          fi
+          
+          TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S UTC')
+          FULL_MESSAGE="**SSL证书自动化任务通知**\n\n- **状态**: $STATUS\n- **时间**: $TIMESTAMP\n- **CA**: ZeroSSL (默认)\n- **仓库**: ${{ github.repository }}\n- **工作流**: ${{ github.workflow }}\n- **详情**: $MESSAGE\n- **运行ID**: ${{ github.run_id }}"
+          
+          # 企业微信通知
+          if [ -n "$WECHAT_WEBHOOK" ]; then
+            curl -X POST "$WECHAT_WEBHOOK" \
+              -H "Content-Type: application/json" \
+              -d "{
+                \"msgtype\": \"markdown\",
+                \"markdown\": {
+                  \"content\": \"$FULL_MESSAGE\"
+                }
+              }" && echo "企业微信通知发送成功" || echo "企业微信通知发送失败"
+          fi
