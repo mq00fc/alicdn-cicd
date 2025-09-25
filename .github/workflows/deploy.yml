@@ -2,7 +2,7 @@ name: acme申请证书自动上传到阿里云cdn
 
 on:
   schedule:
-    - cron: '0 2 1 * *'  # 每月1号上午8点执行
+    - cron: '0 0 1 * *'  # 每月1号上午8点执行
   workflow_dispatch:  # 允许手动触发
 
 jobs:
