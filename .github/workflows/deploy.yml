@@ -41,7 +41,7 @@ jobs:
           
           echo "开始一次性申请所有域名的SSL证书"
           echo "域名配置: $CERT_DOMAINS"
-          echo "使用 CA: ZeroSSL (默认)"
+          echo "使用 CA: ${{ env.CA_SERVER }}"
           echo ""
           
           # 将所有域名转换为 -d 参数格式
@@ -81,19 +81,49 @@ jobs:
           echo ""
           
           # 一次性申请所有域名的证书
-          echo "执行证书申请命令..."
-          if ~/.acme.sh/acme.sh --issue --debug --dns dns_ali $ALL_DOMAIN_ARGS; then
-            echo "✅ 所有域名证书申请成功！"
+          echo "执行证书申请命令 (使用 ZeroSSL)..."
+          
+          # 先尝试使用 ZeroSSL 申请
+          if ~/.acme.sh/acme.sh --issue --dns dns_ali $ALL_DOMAIN_ARGS; then
+            echo "✅ ZeroSSL 证书申请成功！"
             echo "CERT_SUCCESS=true" >> $GITHUB_ENV
             echo "PRIMARY_DOMAIN=$PRIMARY_DOMAIN" >> $GITHUB_ENV
           elif ~/.acme.sh/acme.sh --renew -d "$PRIMARY_DOMAIN" --force; then
-            echo "✅ 证书强制续期成功！"
+            echo "✅ ZeroSSL 证书强制续期成功！"
             echo "CERT_SUCCESS=true" >> $GITHUB_ENV
             echo "PRIMARY_DOMAIN=$PRIMARY_DOMAIN" >> $GITHUB_ENV
           else
-            echo "❌ 证书申请失败！"
-            echo "CERT_SUCCESS=false" >> $GITHUB_ENV
-            exit 1
+            echo ""
+            echo "⚠️  ZeroSSL 申请失败，切换到 Let's Encrypt 重试..."
+            echo ""
+            
+            # 切换到 Let's Encrypt
+            ~/.acme.sh/acme.sh --set-default-ca --server letsencrypt
+            echo "CA_SERVER=Let's Encrypt" >> $GITHUB_ENV
+            
+            # 清理可能存在的 ZeroSSL 证书缓存
+            echo "清理 ZeroSSL 证书缓存..."
+            for domain in $ALL_DOMAINS; do
+              domain=$(echo "$domain" | xargs)
+              if [ -n "$domain" ]; then
+                rm -rf $HOME/.acme.sh/${domain}_ecc || true
+                rm -rf $HOME/.acme.sh/${domain} || true
+              fi
+            done
+            
+            # 使用 Let's Encrypt 重新申请
+            echo "使用 Let's Encrypt 申请证书..."
+            if ~/.acme.sh/acme.sh --issue --dns dns_ali $ALL_DOMAIN_ARGS --force; then
+              echo "✅ Let's Encrypt 证书申请成功！"
+              echo "CERT_SUCCESS=true" >> $GITHUB_ENV
+              echo "PRIMARY_DOMAIN=$PRIMARY_DOMAIN" >> $GITHUB_ENV
+            else
+              echo "❌ Let's Encrypt 证书申请也失败！"
+              echo "显示详细日志："
+              cat $HOME/.acme.sh/acme.sh.log | tail -100
+              echo "CERT_SUCCESS=false" >> $GITHUB_ENV
+              exit 1
+            fi
           fi
           
       - name: 一次性上传证书到阿里云CDN
@@ -148,6 +178,7 @@ jobs:
           echo "CERT_SUCCESS: ${{ env.CERT_SUCCESS }}"
           echo "CDN_DEPLOY_SUCCESS: ${{ env.CDN_DEPLOY_SUCCESS }}"
           echo "PRIMARY_DOMAIN: ${{ env.PRIMARY_DOMAIN }}"
+          echo "CA_SERVER: ${{ env.CA_SERVER }}"
 
       - name: 更新README保持仓库活跃
         if: env.CERT_SUCCESS == 'true'
@@ -155,6 +186,7 @@ jobs:
           TIMESTAMP=$(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')
           CERT_STATUS="${{ env.CERT_SUCCESS }}"
           CDN_STATUS="${{ env.CDN_DEPLOY_SUCCESS }}"
+          CA_SERVER="${{ env.CA_SERVER }}"
           
           # 确定状态图标
           if [ "$CERT_STATUS" == "true" ] && [ "$CDN_STATUS" == "true" ]; then
@@ -178,11 +210,13 @@ jobs:
           
           - **状态**: $STATUS_ICON $STATUS_TEXT
           - **最后运行时间**: $TIMESTAMP (北京时间)
+          - **使用CA**: ${CA_SERVER:-ZeroSSL}
           - **运行ID**: ${{ github.run_id }}
           
           ## 功能说明
       
           - 自动使用 acme.sh 申请 SSL 证书
+          - 优先使用 ZeroSSL，失败时自动切换到 Let's Encrypt
           - 支持多域名一次性申请
           - 自动上传证书到阿里云 CDN
           - 每月自动运行一次
@@ -232,6 +266,7 @@ jobs:
           CDN_DEPLOY_SUCCESS="${{ env.CDN_DEPLOY_SUCCESS }}"
           PRIMARY_DOMAIN="${{ env.PRIMARY_DOMAIN }}"
           JOB_STATUS="${{ job.status }}"
+          CA_SERVER="${{ env.CA_SERVER }}"
           
           if [ "$JOB_STATUS" == "success" ] && [ "$CERT_SUCCESS" == "true" ] && [ "$CDN_DEPLOY_SUCCESS" == "true" ]; then
             STATUS="✅ 完全成功"
@@ -268,7 +303,7 @@ jobs:
             CDN_INFO="\n- **CDN域名数**: $CDN_COUNT 个"
           fi
           
-          FULL_MESSAGE="$EMOJI **SSL证书自动化任务通知**\n\n- **状态**: $STATUS\n- **时间**: $TIMESTAMP\n- **CA**: ZeroSSL (默认)\n- **仓库**: ${{ github.repository }}$DOMAIN_INFO$CDN_INFO\n- **详情**: $MESSAGE\n- **运行ID**: ${{ github.run_id }}"
+          FULL_MESSAGE="$EMOJI **SSL证书自动化任务通知**\n\n- **状态**: $STATUS\n- **时间**: $TIMESTAMP\n- **CA**: ${CA_SERVER:-ZeroSSL}\n- **仓库**: ${{ github.repository }}$DOMAIN_INFO$CDN_INFO\n- **详情**: $MESSAGE\n- **运行ID**: ${{ github.run_id }}"
           
           # 企业微信通知
           if [ -n "$WECHAT_WEBHOOK" ]; then
