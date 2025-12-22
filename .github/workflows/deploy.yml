@@ -266,6 +266,7 @@ _timestamp() {\
             echo "CDN_DEPLOY_SUCCESS=false" >> $GITHUB_ENV
             exit 1
           fi
+        fi
           
       - name: 检查最终状态
         if: always()
