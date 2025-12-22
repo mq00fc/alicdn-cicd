@@ -21,6 +21,8 @@ jobs:
         run: |
           echo "配置使用 ZeroSSL"
           $HOME/.acme.sh/acme.sh --set-default-ca --server zerossl
+          # 强制升级&&自动升级
+          $HOME/.acme.sh/acme.sh --upgrade --auto-upgrade
           echo "CA_SERVER=ZeroSSL" >> $GITHUB_ENV
           echo "配置完成"
           
