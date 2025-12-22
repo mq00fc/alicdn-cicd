@@ -178,6 +178,7 @@ jobs:
             echo "CDN_DEPLOY_SUCCESS=true" >> $GITHUB_ENV
           else
             echo "⚠️ acme.sh 部署失败，尝试使用阿里云 CLI..."
+            
             # 安装阿里云 CLI
             echo "安装阿里云 CLI..."
             wget https://aliyuncli.alicdn.com/aliyun-cli-linux-latest-amd64.tgz
@@ -203,7 +204,7 @@ jobs:
               echo "CDN_DEPLOY_SUCCESS=false" >> $GITHUB_ENV
               exit 1
             fi
-              
+            
             CERT_FILE="$CERT_DIR/fullchain.cer"
             KEY_FILE="$CERT_DIR/${PRIMARY_DOMAIN}.key"
             
@@ -212,7 +213,7 @@ jobs:
               echo "CDN_DEPLOY_SUCCESS=false" >> $GITHUB_ENV
               exit 1
             fi
-              
+            
             # 读取证书内容
             CERT_CONTENT=$(cat "$CERT_FILE")
             KEY_CONTENT=$(cat "$KEY_FILE")
@@ -234,7 +235,7 @@ jobs:
                 SUCCESS=false
               fi
             done
-              
+            
             if [ "$SUCCESS" = true ]; then
               echo "✅ 所有 CDN 域名证书上传成功！"
               echo "CDN_DEPLOY_SUCCESS=true" >> $GITHUB_ENV
@@ -243,10 +244,6 @@ jobs:
               echo "CDN_DEPLOY_SUCCESS=false" >> $GITHUB_ENV
               exit 1
             fi
-          else
-            echo "❌ 证书上传到CDN失败！"
-            echo "CDN_DEPLOY_SUCCESS=false" >> $GITHUB_ENV
-            exit 1
           fi
           
       - name: 检查最终状态
