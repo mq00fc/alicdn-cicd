@@ -173,7 +173,7 @@ jobs:
           
           # 直接部署到CDN，acme.sh会自动处理证书文件
           echo "执行CDN部署命令..."
-          if ~/.acme.sh/acme.sh --deploy -d "$PRIMARY_DOMAIN" --deploy-hook ali_cdn --debug; then
+          if ~/.acme.sh/acme.sh --deploy -d "$PRIMARY_DOMAIN" --deploy-hook ali_cdn; then
             echo "✅ 证书成功上传到阿里云CDN！"
             echo "CDN_DEPLOY_SUCCESS=true" >> $GITHUB_ENV
           else
