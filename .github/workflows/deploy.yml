@@ -14,7 +14,7 @@ jobs:
         
       - name: 安装acme.sh
         run: |
-          curl https://get.acme.sh | sh -s email=${{ secrets.ACME_EMAIL || 'acme@example.com' }}
+          curl https://get.acme.sh | sh -s email=${{ secrets.ACME_EMAIL || 'github-actions[bot]@users.noreply.github.com' }}
           echo "$HOME/.acme.sh" >> $GITHUB_PATH
 
       - name: 配置CA服务器
@@ -107,7 +107,7 @@ jobs:
               domain=$(echo "$domain" | xargs)
               if [ -n "$domain" ]; then
                 rm -rf $HOME/.acme.sh/${domain}_ecc || true
-                rm -rf $HOME/.acme.sh/${domain} || true
+                rm -rf $HOME/.acme.sh/ca/acme-v02.api.letsencrypt.org
               fi
             done
             
@@ -119,8 +119,11 @@ jobs:
               echo "PRIMARY_DOMAIN=$PRIMARY_DOMAIN" >> $GITHUB_ENV
             else
               echo "❌ Let's Encrypt 证书申请也失败！"
-              echo "显示详细日志："
-              cat $HOME/.acme.sh/acme.sh.log | tail -100
+              if [ -f "$HOME/.acme.sh/acme.sh.log" ]; then
+                cat $HOME/.acme.sh/acme.sh.log | tail -100
+              else
+                echo "日志文件不存在"
+              fi
               echo "CERT_SUCCESS=false" >> $GITHUB_ENV
               exit 1
             fi
