@@ -19,28 +19,10 @@ jobs:
 
       - name: 配置CA服务器
         run: |
-          # 使用 ZeroSSL
           echo "配置使用 ZeroSSL"
-          
-          # 完全清理 acme.sh 配置和缓存
-          echo "完全清理旧配置..."
-          rm -rf $HOME/.acme.sh/account.conf || true
-          rm -rf $HOME/.acme.sh/ca || true
-          
-          # 清理所有证书目录
-          echo "清理所有证书缓存..."
-          find $HOME/.acme.sh -maxdepth 1 -type d -name "*.*" ! -name "dnsapi" ! -name "deploy" -exec rm -rf {} \; || true
-          
-          # 重新注册 ZeroSSL 账号
-          $HOME/.acme.sh/acme.sh --register-account --server zerossl \
-            --accountemail ${{ secrets.ACME_EMAIL || 'mq00fc@example.com' }}
-          
-          # 设置默认 CA 为 ZeroSSL
           $HOME/.acme.sh/acme.sh --set-default-ca --server zerossl
           echo "CA_SERVER=ZeroSSL" >> $GITHUB_ENV
-          
           echo "配置完成"
-          
           
       - name: 一次性申请所有域名的SSL证书
         env:
