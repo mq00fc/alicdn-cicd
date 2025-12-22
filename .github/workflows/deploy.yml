@@ -61,6 +61,18 @@ jobs:
             DOMAIN_COUNT=$((DOMAIN_COUNT + 1))
             echo "添加域名: $domain"
           done
+
+          # 清理所有旧证书缓存
+          echo "清理所有旧证书缓存..."          
+          for domain in $ALL_DOMAINS; do
+            domain=$(echo "$domain" | xargs)
+            if [ -n "$domain" ]; then
+              echo "清理域名 $domain 的缓存..."
+              rm -rf $HOME/.acme.sh/${domain}_ecc || true
+              rm -rf $HOME/.acme.sh/${domain} || true
+            fi
+          done
+          echo "缓存清理完成"
           
           echo ""
           echo "========================================"
