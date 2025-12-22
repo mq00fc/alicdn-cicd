@@ -196,76 +196,75 @@ _timestamp() {\
             echo "CDN_DEPLOY_SUCCESS=true" >> $GITHUB_ENV
           else
             echo "⚠️ acme.sh 部署失败，尝试使用阿里云 CLI..."              
-              # 安装阿里云 CLI
-              echo "安装阿里云 CLI..."
-              wget https://aliyuncli.alicdn.com/aliyun-cli-linux-latest-amd64.tgz
-              tar xzvf aliyun-cli-linux-latest-amd64.tgz
-              sudo mv aliyun /usr/local/bin/
-              
-              # 配置阿里云 CLI
-              aliyun configure set \
-                --profile default \
-                --mode AK \
-                --region cn-hangzhou \
-                --access-key-id "${{ secrets.ALI_KEY }}" \
-                --access-key-secret "${{ secrets.ALI_SECRET }}"
-              
-              # 获取证书文件路径
-              CERT_DIR="$HOME/.acme.sh/${PRIMARY_DOMAIN}_ecc"
-              if [ ! -d "$CERT_DIR" ]; then
-                CERT_DIR="$HOME/.acme.sh/${PRIMARY_DOMAIN}"
-              fi
-              
-              if [ ! -d "$CERT_DIR" ]; then
-                echo "❌ 找不到证书目录"
-                echo "CDN_DEPLOY_SUCCESS=false" >> $GITHUB_ENV
-                exit 1
-              fi
-              
-              CERT_FILE="$CERT_DIR/fullchain.cer" 
-              KEY_FILE="$CERT_DIR/${PRIMARY_DOMAIN}.key"
-              
-              if [ ! -f "$CERT_FILE" ] || [ ! -f "$KEY_FILE" ]; then
-                echo "❌ 找不到证书文件"
-                echo "CDN_DEPLOY_SUCCESS=false" >> $GITHUB_ENV
-                exit 1
-              fi
-              
-              # 读取证书内容
-              CERT_CONTENT=$(cat "$CERT_FILE")
-              KEY_CONTENT=$(cat "$KEY_FILE")
-              
-              # 为每个 CDN 域名上传证书
-              SUCCESS=true
-              for domain in $CDN_DOMAINS; do
-                echo "上传证书到域名: $domain"
-                
-                if aliyun cdn SetDomainServerCertificate \
-                  --DomainName "$domain" \
-                  --ServerCertificateStatus on \
-                  --CertType upload \
-                  --ServerCertificate "$CERT_CONTENT" \
-                  --PrivateKey "$KEY_CONTENT"; then
-                  echo "✅ 域名 $domain 证书上传成功"
-                else
-                  echo "❌ 域名 $domain 证书上传失败"
-                  SUCCESS=false
-                fi
-              done
-              
-              if [ "$SUCCESS" = true ]; then
-                echo "✅ 所有 CDN 域名证书上传成功！"
-                echo "CDN_DEPLOY_SUCCESS=true" >> $GITHUB_ENV
-              else
-                echo "❌ 部分 CDN 域名证书上传失败"
-                echo "CDN_DEPLOY_SUCCESS=false" >> $GITHUB_ENV
-                exit 1
-              fi
-            else
-              echo "❌ 证书上传到CDN失败！"
+            # 安装阿里云 CLI
+            echo "安装阿里云 CLI..."
+            wget https://aliyuncli.alicdn.com/aliyun-cli-linux-latest-amd64.tgz
+            tar xzvf aliyun-cli-linux-latest-amd64.tgz
+            sudo mv aliyun /usr/local/bin/
+            
+            # 配置阿里云 CLI
+            aliyun configure set \
+              --profile default \
+              --mode AK \
+              --region cn-hangzhou \
+              --access-key-id "${{ secrets.ALI_KEY }}" \
+              --access-key-secret "${{ secrets.ALI_SECRET }}"
+            
+            # 获取证书文件路径
+            CERT_DIR="$HOME/.acme.sh/${PRIMARY_DOMAIN}_ecc"
+            if [ ! -d "$CERT_DIR" ]; then
+              CERT_DIR="$HOME/.acme.sh/${PRIMARY_DOMAIN}"
+            fi
+            
+            if [ ! -d "$CERT_DIR" ]; then
+              echo "❌ 找不到证书目录"
               echo "CDN_DEPLOY_SUCCESS=false" >> $GITHUB_ENV
               exit 1
             fi
+            
+            CERT_FILE="$CERT_DIR/fullchain.cer" 
+            KEY_FILE="$CERT_DIR/${PRIMARY_DOMAIN}.key"
+            
+            if [ ! -f "$CERT_FILE" ] || [ ! -f "$KEY_FILE" ]; then
+              echo "❌ 找不到证书文件"
+              echo "CDN_DEPLOY_SUCCESS=false" >> $GITHUB_ENV
+              exit 1
+            fi
+            
+            # 读取证书内容
+            CERT_CONTENT=$(cat "$CERT_FILE")
+            KEY_CONTENT=$(cat "$KEY_FILE")
+            
+            # 为每个 CDN 域名上传证书
+            SUCCESS=true
+            for domain in $CDN_DOMAINS; do
+              echo "上传证书到域名: $domain"
+              
+              if aliyun cdn SetDomainServerCertificate \
+                --DomainName "$domain" \
+                --ServerCertificateStatus on \
+                --CertType upload \
+                --ServerCertificate "$CERT_CONTENT" \
+                --PrivateKey "$KEY_CONTENT"; then
+                echo "✅ 域名 $domain 证书上传成功"
+              else
+                echo "❌ 域名 $domain 证书上传失败"
+                SUCCESS=false
+              fi
+            done
+            
+            if [ "$SUCCESS" = true ]; then
+              echo "✅ 所有 CDN 域名证书上传成功！"
+              echo "CDN_DEPLOY_SUCCESS=true" >> $GITHUB_ENV
+            else
+              echo "❌ 部分 CDN 域名证书上传失败"
+              echo "CDN_DEPLOY_SUCCESS=false" >> $GITHUB_ENV
+              exit 1
+            fi
+          else
+            echo "❌ 证书上传到CDN失败！"
+            echo "CDN_DEPLOY_SUCCESS=false" >> $GITHUB_ENV
+            exit 1
           fi
           
       - name: 检查最终状态
