@@ -23,7 +23,7 @@ jobs:
             ACME_EMAIL="$DEFAULT_EMAIL"
           fi
           
-          curl https://get.acme.sh | sh -s email="$ACME_EMAIL"
+          BRANCH=dev curl https://get.acme.sh | sh -s email="$ACME_EMAIL" 
           echo "$HOME/.acme.sh" >> $GITHUB_PATH
           
           echo "acme.sh 安装完成，使用邮箱: $ACME_EMAIL"
