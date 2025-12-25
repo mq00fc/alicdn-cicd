@@ -15,7 +15,7 @@ jobs:
       - name: 安装acme.sh
         run: |
           # 使用有效的默认邮箱（GitHub Actions 的 noreply 地址）
-          DEFAULT_EMAIL="github-actions[bot]@users.noreply.github.com"
+          DEFAULT_EMAIL="actions@users.noreply.github.com"
           ACME_EMAIL="${{ secrets.ACME_EMAIL }}"
           
           if [ -z "$ACME_EMAIL" ]; then
